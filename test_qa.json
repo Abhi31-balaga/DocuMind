@@ -1,0 +1,14 @@
+[
+  {
+    "question": "What is the main topic of the document?",
+    "expected_answer": "Replace with a short ground-truth fact for your test PDF."
+  },
+  {
+    "question": "Example: What year did the event described in chapter 1 take place?",
+    "expected_answer": "Example: 2021"
+  },
+  {
+    "question": "Example: Who is the author of the referenced study?",
+    "expected_answer": "Example: Jane Doe"
+  }
+]

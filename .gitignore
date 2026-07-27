@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+.Python
+build/
+dist/
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Environment variables / secrets
+.env
+*.key
+
+# Streamlit
+.streamlit/secrets.toml
+
+# ChromaDB persistent storage (per-document vector collections)
+chroma_db/
+.chroma/
+
+# Uploaded documents (runtime user data — don't version)
+uploads/
+
+# Evaluation outputs
+eval_results/
+*.eval.json
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
