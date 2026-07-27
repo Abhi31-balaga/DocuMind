@@ -38,6 +38,26 @@ streamlit run app.py
 Enter your OpenAI API key in the sidebar (never hard-coded — it's read from a
 password-masked input field at runtime only, and never written to disk).
 
+## Deploying to Streamlit Cloud
+
+1. Push this repo to GitHub.
+2. Go to https://streamlit.io/cloud and connect your GitHub account.
+3. Create a new app using:
+   - Repository: your DocuMind repo
+   - Branch: `main`
+   - Main file path: `app.py`
+4. Add these secrets in Streamlit Cloud:
+   - `AI_PROVIDER = "groq"` or `"openai"`
+   - `GROQ_API_KEY = "your-groq-api-key"` (if using Groq)
+   - `OPENAI_API_KEY = "your-openai-api-key"` (if using OpenAI)
+
+For local development, you can also store keys in `.env` or use the Streamlit
+sidebar input.
+
+## Streamlit secrets example
+
+A sample secrets file is provided at `.streamlit/secrets.toml.example`.
+
 ## Evaluation methodology (how the accuracy number is produced)
 
 `eval.py` runs the real pipeline against a small hand-labeled test set (`test_qa.json`)
