@@ -13,15 +13,15 @@ other's retrieval results.
 """
 
 import hashlib
+import json
+import math
+from pathlib import Path
 from typing import Any
 
-import chromadb
-from chromadb.utils import embedding_functions
-from groq import Groq
 from openai import OpenAI
 
 from src.chunking import Chunk
-from src.config import PERSIST_DIR, EMBEDDING_MODEL, TOP_K, get_provider_name
+from src.config import PERSIST_DIR, EMBEDDING_MODEL, TOP_K
 
 
 def collection_name_for(file_bytes: bytes) -> str:
@@ -30,19 +30,40 @@ def collection_name_for(file_bytes: bytes) -> str:
     return f"doc_{digest}"
 
 
+def _cosine_similarity(a: list[float], b: list[float]) -> float:
+    dot = 0.0
+    norm_a = 0.0
+    norm_b = 0.0
+    for x, y in zip(a, b):
+        dot += x * y
+        norm_a += x * x
+        norm_b += y * y
+    if norm_a == 0 or norm_b == 0:
+        return 0.0
+    return dot / (math.sqrt(norm_a) * math.sqrt(norm_b))
+
+
+def _collection_path(persist_dir: Path, collection_name: str) -> Path:
+    return persist_dir / f"{collection_name}.json"
+
+
+def _load_collection(file_path: Path) -> dict:
+    if not file_path.exists():
+        return {"ids": [], "documents": [], "metadatas": [], "embeddings": []}
+    return json.loads(file_path.read_text(encoding="utf-8"))
+
+
+def _save_collection(file_path: Path, data: dict) -> None:
+    file_path.write_text(json.dumps(data), encoding="utf-8")
+
+
 class VectorStore:
     def __init__(self, client: Any, persist_dir: str = PERSIST_DIR):
         self._client = client
-        self._chroma = chromadb.PersistentClient(path=persist_dir)
-        self._local_embedding_fn = embedding_functions.SentenceTransformerEmbeddingFunction(
-            model_name=EMBEDDING_MODEL,
-        )
+        self._persist_dir = Path(persist_dir)
+        self._persist_dir.mkdir(parents=True, exist_ok=True)
 
     def _embed(self, texts: list[str]) -> list[list[float]]:
-        provider = get_provider_name()
-        if provider == "groq":
-            return self._local_embedding_fn(texts)
-
         response = self._client.embeddings.create(
             model=EMBEDDING_MODEL,
             input=texts,
@@ -50,44 +71,48 @@ class VectorStore:
         return [item.embedding for item in response.data]
 
     def collection_exists(self, name: str) -> bool:
-        existing = [c.name for c in self._chroma.list_collections()]
-        return name in existing
+        return _collection_path(self._persist_dir, name).exists()
 
     def index_chunks(self, collection_name: str, chunks: list[Chunk]) -> None:
-        """Embed and store chunks. Skips work if already indexed."""
-        collection = self._chroma.get_or_create_collection(collection_name)
-        if collection.count() > 0:
+        """Embed and store chunks in a lightweight JSON collection."""
+        file_path = _collection_path(self._persist_dir, collection_name)
+        data = _load_collection(file_path)
+        if data["ids"]:
             return  # already indexed in a previous session
 
-        # Batch embeddings to stay well under API request size limits.
         batch_size = 100
         for start in range(0, len(chunks), batch_size):
             batch = chunks[start:start + batch_size]
             embeddings = self._embed([c.text for c in batch])
-            collection.add(
-                ids=[c.id for c in batch],
-                embeddings=embeddings,
-                documents=[c.text for c in batch],
-                metadatas=[{"page_numbers": ",".join(map(str, c.page_numbers))} for c in batch],
+            data["ids"].extend(c.id for c in batch)
+            data["documents"].extend(c.text for c in batch)
+            data["metadatas"].extend(
+                {"page_numbers": ",".join(map(str, c.page_numbers))} for c in batch
             )
+            data["embeddings"].extend(embeddings)
+
+        _save_collection(file_path, data)
 
     def query(self, collection_name: str, question: str, top_k: int = TOP_K):
-        collection = self._chroma.get_or_create_collection(collection_name)
+        file_path = _collection_path(self._persist_dir, collection_name)
+        data = _load_collection(file_path)
+        if not data["ids"]:
+            return []
+
         query_embedding = self._embed([question])[0]
-        results = collection.query(
-            query_embeddings=[query_embedding],
-            n_results=min(top_k, max(collection.count(), 1)),
-        )
-        documents = results.get("documents", [[]])[0]
-        metadatas = results.get("metadatas", [[]])[0]
-        ids = results.get("ids", [[]])[0]
-        distances = results.get("distances", [[]])[0]
+        scores = [
+            (_cosine_similarity(query_embedding, emb), idx)
+            for idx, emb in enumerate(data["embeddings"])
+        ]
+        scores.sort(key=lambda x: x[0], reverse=True)
+
+        top_results = [scores[i][1] for i in range(min(top_k, len(scores)))]
         return [
             {
-                "id": ids[i],
-                "text": documents[i],
-                "page_numbers": metadatas[i].get("page_numbers", ""),
-                "distance": distances[i],
+                "id": data["ids"][idx],
+                "text": data["documents"][idx],
+                "page_numbers": data["metadatas"][idx].get("page_numbers", ""),
+                "distance": 1.0 - scores[i][0],
             }
-            for i in range(len(documents))
+            for i, idx in enumerate(top_results)
         ]
